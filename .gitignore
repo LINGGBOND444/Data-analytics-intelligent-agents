@@ -1,0 +1,42 @@
+# ============================================
+# Git 忽略规则
+# ============================================
+# 以下文件和目录不会被 Git 管理
+# 用 # 开头的行是注释
+
+# Python 缓存文件
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# 虚拟环境（如果有的话）
+venv/
+.venv/
+env/
+
+# 日志文件 — 每次运行都会变，不需要存档
+logs/
+
+# 生成的报告 — 可以随时重新生成
+reports/
+
+# 数据文件 — 包含实际业务数据，通常不提交到 Git
+data/*.xlsx
+data/*.csv
+
+# 配置文件 — 包含 API 密钥和密码等敏感信息
+# 请使用 config.example.json 作为模板
+config.json
+
+# IDE 和编辑器配置
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Windows 系统文件
+Thumbs.db
+Desktop.ini

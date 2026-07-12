@@ -50,28 +50,29 @@ def detect_anomalies(config: dict, sales_data: pd.DataFrame) -> pd.DataFrame:
     # 1. 如果原始数据已自带前日列 → 直接使用
     # 2. 否则 → 尝试从 data/ 目录读取前一日文件来合并
 
-    if "前日销量" in df.columns and df["前日销量"].notna().any():
-        # 原始数据中已包含前日数据（可能是手动合并好的多日数据）
-        logger.info("数据中已包含前日销量列，直接使用")
+    if "上期销量" in df.columns and df["上期销量"].notna().any():
+        # 原始数据中已包含上期数据（可能是手动合并好的多日数据）
+        logger.info("数据中已包含上期销量列，直接使用")
+        comparison_date = "（内嵌数据）"
     else:
-        # 尝试从历史文件加载前日数据
-        df = _try_load_previous_day(config, df)
-        # 如果加载后还是没有前日数据，初始化为 NaN
-        if "前日销量" not in df.columns:
-            df["前日销量"] = np.nan
-        if "前日销售额" not in df.columns:
-            df["前日销售额"] = np.nan
+        # 尝试从历史文件加载上期数据
+        df, comparison_date = _try_load_previous_day(config, df)
+        # 如果加载后还是没有上期数据，初始化为 NaN
+        if "上期销量" not in df.columns:
+            df["上期销量"] = np.nan
+        if "上期销售额" not in df.columns:
+            df["上期销售额"] = np.nan
 
     # ----- 环比计算 -----
     df["销量变化%"] = np.where(
-        df["前日销量"].notna() & (df["前日销量"] > 0),
-        ((df["销售量"] - df["前日销量"]) / df["前日销量"] * 100).round(1),
+        df["上期销量"].notna() & (df["上期销量"] > 0),
+        ((df["销售量"] - df["上期销量"]) / df["上期销量"] * 100).round(1),
         np.nan
     )
 
     df["销售额变化%"] = np.where(
-        df["前日销售额"].notna() & (df["前日销售额"] > 0),
-        ((df["销售额"] - df["前日销售额"]) / df["前日销售额"] * 100).round(1),
+        df["上期销售额"].notna() & (df["上期销售额"] > 0),
+        ((df["销售额"] - df["上期销售额"]) / df["上期销售额"] * 100).round(1),
         np.nan
     )
 
@@ -104,10 +105,30 @@ def detect_anomalies(config: dict, sales_data: pd.DataFrame) -> pd.DataFrame:
 
         # 零销量检测
         if enable_zero_check:
-            prev_vol = row.get("前日销量", np.nan)
+            prev_vol = row.get("上期销量", np.nan)
             cur_vol = row.get("销售量", 0)
             if not pd.isna(prev_vol) and prev_vol > 0 and cur_vol == 0:
                 row_anomalies.append("断崖式下跌（昨日销量归零）")
+
+        # 库存不足检测（需要日进货量列）
+        if "日进货量" in df.columns:
+            restock_val = row.get("日进货量", 0)
+            stock_val = row.get("库存", 0)
+            cur_vol = row.get("销售量", 0)
+
+            if pd.isna(restock_val):
+                restock_val = 0
+            if pd.isna(stock_val):
+                stock_val = 0
+
+            stock_threshold = config["异常检测"].get("库存紧张阈值", 10)
+
+            # 零进货 + 库存不够卖
+            if restock_val == 0 and cur_vol > 0 and stock_val < cur_vol:
+                row_anomalies.append("未进货，库存即将耗尽")
+            # 进货不足（进货量不到销量一半）+ 库存紧张
+            elif restock_val < cur_vol * 0.5 and stock_val < stock_threshold:
+                row_anomalies.append("进货不足导致库存紧张")
 
         if row_anomalies:
             anomalies.append({
@@ -124,7 +145,7 @@ def detect_anomalies(config: dict, sales_data: pd.DataFrame) -> pd.DataFrame:
         for _, r in result.iterrows():
             logger.info(f"  - {r['产品名称']}：{r['异常类型']}")
 
-    return result
+    return result, comparison_date
 
 
 def _try_load_previous_day(config: dict, df: pd.DataFrame) -> pd.DataFrame:
@@ -143,29 +164,49 @@ def _try_load_previous_day(config: dict, df: pd.DataFrame) -> pd.DataFrame:
                 os.path.dirname(os.path.dirname(__file__)), data_dir[2:]
             )
 
-        # 推断前一天的日期
+        # 推断目标日期
         dates = pd.to_datetime(df["日期"]).dropna()
         if len(dates) == 0:
-            return df
+            return df, None
         target_date = pd.to_datetime(dates.iloc[0])
+
+        # 收集 data/ 下所有 Excel/CSV 文件
+        files = glob.glob(f"{data_dir}/*.xlsx") + glob.glob(f"{data_dir}/*.csv")
+
+        # 提取所有文件名中的日期，用于回退查找
+        import re
+        file_dates = {}
+        for f in files:
+            m = re.search(r'(\d{4}-\d{2}-\d{2})', os.path.basename(f))
+            if m:
+                file_dates[m.group(1)] = f
+
+        # 第一步：尝试前一日
         prev_date = (target_date - timedelta(days=1)).strftime("%Y-%m-%d")
         prev_short = (target_date - timedelta(days=1)).strftime("%Y%m%d")
-
-        # 搜索前一天的 Excel 文件
-        files = glob.glob(f"{data_dir}/*.xlsx") + glob.glob(f"{data_dir}/*.csv")
-        prev_file = None
-        for f in files:
-            if prev_date in f or prev_short in f:
-                prev_file = f
-                break
-
+        prev_file = file_dates.get(prev_date)
         if prev_file is None:
-            logger.info(f"未找到前一日（{prev_date}）的数据文件，跳过环比计算")
-            return df
+            for f in files:
+                if prev_date in f or prev_short in f:
+                    prev_file = f
+                    break
 
-        logger.info(f"找到前一日数据文件：{os.path.basename(prev_file)}")
+        # 第二步：前一日找不到，回退到最近一期
+        if prev_file is None:
+            earlier_dates = [d for d in file_dates if d < target_date.strftime("%Y-%m-%d")]
+            if earlier_dates:
+                earlier_dates.sort(reverse=True)
+                prev_date = earlier_dates[0]
+                prev_file = file_dates[prev_date]
+                logger.info(f"前一日无数据，回退使用最近一期：{prev_date}")
+            else:
+                logger.info("未找到任何历史数据文件，跳过环比计算")
+                return df, None
 
-        # 读取前一日数据
+        comparison_date = prev_date[:10]  # YYYY-MM-DD
+        logger.info(f"对比基准日期：{comparison_date}，文件：{os.path.basename(prev_file)}")
+
+        # 读取对比基准数据
         import pandas as _pd
         if prev_file.endswith(".csv"):
             prev_df = _pd.read_csv(prev_file, encoding="utf-8-sig")
@@ -178,19 +219,20 @@ def _try_load_previous_day(config: dict, df: pd.DataFrame) -> pd.DataFrame:
 
         # 确保有产品名称列
         if "产品名称" not in prev_df.columns:
-            return df
+            return df, None
 
         prev_df["销售量"] = _pd.to_numeric(prev_df["销售量"], errors="coerce")
         prev_df["销售额"] = _pd.to_numeric(prev_df["销售额"], errors="coerce")
 
-        # 合并前日数据
+        # 合并上期数据
         prev_map = prev_df.set_index("产品名称")[["销售量", "销售额"]]
-        prev_map.columns = ["前日销量", "前日销售额"]
+        prev_map.columns = ["上期销量", "上期销售额"]
 
         df = df.join(prev_map, on="产品名称")
-        logger.info(f"成功合并前日数据，{df['前日销量'].notna().sum()} 个产品可环比")
+        logger.info(f"成功合并上期数据（{comparison_date}），{df['上期销量'].notna().sum()} 个产品可环比")
 
     except Exception as e:
-        logger.warning(f"加载前日数据失败：{e}，跳过环比计算")
+        logger.warning(f"加载上期数据失败：{e}，跳过环比计算")
+        return df, None
 
-    return df
+    return df, comparison_date

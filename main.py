@@ -78,21 +78,23 @@ def main():
 
         # 3. 异常检测
         logger.info("正在进行异常检测...")
-        anomalies = detect_anomalies(config, sales_data)
+        anomalies, comparison_date = detect_anomalies(config, sales_data)
+        if comparison_date:
+            logger.info(f"  环比基准日期：{comparison_date}")
         logger.info(f"✓ 异常检测完成，发现 {len(anomalies)} 个异常")
 
         # 4. AI 归因分析（仅在有异常时触发）
         analysis_results = []
         if config.get("AI分析", {}).get("启用", True) and not anomalies.empty:
             logger.info("正在进行 AI 归因分析...")
-            analysis_results = analyze_anomalies(config, anomalies, sales_data)
+            analysis_results = analyze_anomalies(config, anomalies, sales_data, comparison_date)
             logger.info(f"✓ AI 分析完成，共 {len(analysis_results)} 条分析结论")
         elif anomalies.empty:
             logger.info("无异常产品，跳过 AI 分析")
 
         # 5. 报告生成
         logger.info("正在生成分析报告...")
-        report_path = generate_report(config, sales_data, anomalies, analysis_results, target_date)
+        report_path = generate_report(config, sales_data, anomalies, analysis_results, target_date, comparison_date)
         logger.info(f"✓ 报告已生成：{report_path}")
 
         # 6. 推送通知

@@ -37,10 +37,11 @@ COLUMN_MAP = {
     "amount": "销售额",
     "price": "单价",
     "stock": "库存",
+    "restock": "日进货量",
 }
 
 # Excel 列顺序（确保和现有格式一致）
-COLUMN_ORDER = ["日期", "产品名称", "销售量", "销售额", "单价", "库存"]
+COLUMN_ORDER = ["日期", "产品名称", "销售量", "销售额", "单价", "库存", "日进货量"]
 
 
 def _get_project_root() -> str:
@@ -88,7 +89,7 @@ def _query_date(conn: pymysql.Connection, table_name: str, date_str: str) -> pd.
     返回：
         DataFrame（英文列名）
     """
-    sql = f"SELECT date, product, volume, amount, price, stock FROM `{table_name}` WHERE date = %(date)s"
+    sql = f"SELECT date, product, volume, amount, price, stock, restock FROM `{table_name}` WHERE date = %(date)s"
     df = pd.read_sql(sql, conn, params={"date": date_str})
 
     if df.empty:
@@ -171,6 +172,18 @@ def export_to_excel(config: dict, target_date: str) -> tuple:
 
         # 导出前一天数据（异常检测需要它做环比）
         df_prev = _query_date(conn, table_name, prev_date)
+
+        # 如果前一天没数据，回退到 MySQL 中最近有数据的日期
+        if df_prev.empty:
+            fallback_sql = f"SELECT MAX(date) FROM `{table_name}` WHERE date < %(date)s"
+            cursor = conn.cursor()
+            cursor.execute(fallback_sql, {"date": target_date})
+            result = cursor.fetchone()
+            if result and result[0]:
+                prev_date = result[0].strftime("%Y-%m-%d")
+                logger.info(f"前一日无数据，回退使用最近一期：{prev_date}")
+                df_prev = _query_date(conn, table_name, prev_date)
+
         prev_file = _df_to_excel(df_prev, data_dir, prev_date)
 
         conn.close()

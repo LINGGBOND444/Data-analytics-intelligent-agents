@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 # 期望的列名（中文）
 EXPECTED_COLUMNS = ["日期", "产品名称", "销售量", "销售额", "单价", "库存"]
+OPTIONAL_COLUMNS = ["日进货量"]  # 有则检测库存不足，无则跳过，不报错
 
 # 也支持英文列名（自动映射）
 COLUMN_ALIASES = {
@@ -38,6 +39,7 @@ COLUMN_ALIASES = {
     "unit_price": "单价",
     "stock": "库存",
     "inventory": "库存",
+    "restock": "日进货量",
 }
 
 
@@ -55,7 +57,7 @@ def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _validate_columns(df: pd.DataFrame):
-    """检查数据是否包含必要的列"""
+    """检查数据是否包含必要的列（可选列缺失不报错）"""
     missing = [c for c in EXPECTED_COLUMNS if c not in df.columns]
     if missing:
         raise ValueError(
@@ -64,6 +66,9 @@ def _validate_columns(df: pd.DataFrame):
             f"期望列名（中文）：{EXPECTED_COLUMNS}\n"
             f"也支持英文列名：{list(COLUMN_ALIASES.keys())}"
         )
+    for col in OPTIONAL_COLUMNS:
+        if col not in df.columns:
+            logger.info(f"可选列「{col}」不存在，相关检测将跳过")
 
 
 def fetch_from_excel(config: dict, target_date: str) -> pd.DataFrame:
@@ -147,7 +152,18 @@ def fetch_from_mysql(config: dict, target_date: str) -> pd.DataFrame:
     )
 
     table = mysql_cfg["表名"]
-    sql = f"SELECT * FROM `{table}` WHERE `日期` = %(date)s"
+    sql = """
+    SELECT
+        date AS 日期,
+        product AS 产品名称,
+        volume AS 销售量,
+        amount AS 销售额,
+        price AS 单价,
+        stock AS 库存,
+        restock AS 日进货量
+    FROM daily_sales
+    WHERE date = %(date)s
+    """
     df = pd.read_sql(sql, conn, params={"date": target_date})
 
     # 也尝试英文日期列名

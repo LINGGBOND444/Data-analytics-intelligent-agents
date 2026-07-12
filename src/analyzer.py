@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 ANTHROPIC_BASE_URL = "https://api.deepseek.com/anthropic/v1/messages"
 
 
-def _build_analysis_prompt(anomalies: pd.DataFrame, sales_data: pd.DataFrame) -> str:
+def _build_analysis_prompt(anomalies: pd.DataFrame, sales_data: pd.DataFrame, comparison_date: str = None) -> str:
     """构建发送给 AI 的分析提示词"""
 
     # 异常产品摘要
@@ -30,19 +30,20 @@ def _build_analysis_prompt(anomalies: pd.DataFrame, sales_data: pd.DataFrame) ->
         name = row.get("产品名称", "-")
         anomaly_type = row.get("异常类型", "-")
         vol = row.get("销售量", "-")
-        prev_vol = row.get("前日销量", "-")
+        prev_vol = row.get("上期销量", "-")
         vol_chg = row.get("销量变化%", "-")
         amt = row.get("销售额", "-")
-        prev_amt = row.get("前日销售额", "-")
+        prev_amt = row.get("上期销售额", "-")
         amt_chg = row.get("销售额变化%", "-")
         price = row.get("单价", "-")
         stock = row.get("库存", "-")
+        restock = row.get("日进货量", "-")
 
         anomaly_lines.append(
             f"- **{name}**：{anomaly_type}\n"
             f"  销量：{prev_vol} → {vol} （变化 {vol_chg}%）\n"
             f"  销售额：{prev_amt} → {amt} （变化 {amt_chg}%）\n"
-            f"  单价：{price} | 库存：{stock}"
+            f"  单价：{price} | 库存：{stock} | 日进货量：{restock}"
         )
 
     anomaly_text = "\n".join(anomaly_lines)
@@ -65,6 +66,7 @@ def _build_analysis_prompt(anomalies: pd.DataFrame, sales_data: pd.DataFrame) ->
 
 ## 总体数据
 - 分析日期：{sales_data['日期'].iloc[0] if '日期' in sales_data.columns else '最近一天'}
+- 对比基准：{comparison_date if comparison_date else '上期数据'}
 - 产品总数：{total_products} 个
 - 总销售额：¥{total_sales:,.2f}
 - {stock_info}
@@ -79,10 +81,11 @@ def _build_analysis_prompt(anomalies: pd.DataFrame, sales_data: pd.DataFrame) ->
 请对每个异常产品从以下维度进行分析：
 
 1. **库存因素**：库存是否不足？是否缺货导致销量下降？
-2. **价格因素**：单价是否合理？是否有调价迹象？
-3. **趋势判断**：是短期波动还是趋势性变化？是否可能是季节性因素？
-4. **关联分析**：多个产品同时异常是否存在关联？是否暗示整体市场变化？
-5. **建议措施**：针对每个异常产品给出具体的行动建议。
+2. **进货因素**：日进货量是否充足？是否因进货不及时导致缺货？
+3. **价格因素**：单价是否合理？是否有调价迹象？
+4. **趋势判断**：是短期波动还是趋势性变化？是否可能是季节性因素？
+5. **关联分析**：多个产品同时异常是否存在关联？是否暗示整体市场变化？
+6. **建议措施**：针对每个异常产品给出具体的行动建议。
 
 ## 输出格式
 
@@ -94,7 +97,7 @@ def _build_analysis_prompt(anomalies: pd.DataFrame, sales_data: pd.DataFrame) ->
 
 
 def analyze_anomalies(
-    config: dict, anomalies: pd.DataFrame, sales_data: pd.DataFrame
+    config: dict, anomalies: pd.DataFrame, sales_data: pd.DataFrame, comparison_date: str = None
 ) -> list:
     """
     调用 AI 对异常产品进行归因分析。
@@ -118,7 +121,7 @@ def analyze_anomalies(
         logger.warning("AI 分析 API 密钥未配置，跳过分析")
         return []
 
-    prompt = _build_analysis_prompt(anomalies, sales_data)
+    prompt = _build_analysis_prompt(anomalies, sales_data, comparison_date)
 
     logger.info(f"正在调用 AI 模型 ({model}) 进行归因分析...")
     logger.info(f"分析 {len(anomalies)} 个异常产品")

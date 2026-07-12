@@ -24,6 +24,7 @@ def generate_report(
     anomalies: pd.DataFrame,
     analysis_results: list,
     target_date: str,
+    comparison_date: str = None,
 ) -> str:
     """
     生成 Markdown 分析报告。
@@ -65,6 +66,8 @@ def generate_report(
     lines.append(f"# 📊 销售数据分析报告")
     lines.append(f"")
     lines.append(f"**报告日期**：{target_date}")
+    if comparison_date:
+        lines.append(f"  |  **环比基准**：{comparison_date}")
     lines.append(f"**生成时间**：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     lines.append(f"")
     lines.append(f"---")
@@ -92,17 +95,18 @@ def generate_report(
     if anomaly_count > 0:
         lines.append(f"## 二、异常商品明细")
         lines.append(f"")
-        lines.append(f"| 产品名称 | 昨日销量 | 前日销量 | 销量变化% | 昨日销售额 | 前日销售额 | 销售额变化% | 异常类型 |")
-        lines.append(f"|----------|---------|---------|----------|-----------|-----------|-----------|---------|")
+        lines.append(f"| 产品名称 | 昨日销量 | 上期销量 | 销量变化% | 昨日销售额 | 上期销售额 | 销售额变化% | 日进货量 | 异常类型 |")
+        lines.append(f"|----------|---------|---------|----------|-----------|-----------|-----------|---------|---------|")
 
         for _, row in anomalies.iterrows():
             name = row.get("产品名称", "-")
             vol = row.get("销售量", "-")
-            prev_vol = row.get("前日销量", "-")
+            prev_vol = row.get("上期销量", "-")
             vol_chg = row.get("销量变化%", "-")
             amt = row.get("销售额", "-")
-            prev_amt = row.get("前日销售额", "-")
+            prev_amt = row.get("上期销售额", "-")
             amt_chg = row.get("销售额变化%", "-")
+            restock = row.get("日进货量", "-")
             anomaly_type = row.get("异常类型", "-")
 
             # 格式化数值
@@ -112,6 +116,7 @@ def generate_report(
             prev_amt_str = f"¥{prev_amt:,.2f}" if isinstance(prev_amt, (int, float)) and not pd.isna(prev_amt) else str(prev_amt)
             vol_chg_str = f"{vol_chg:+.1f}%" if isinstance(vol_chg, (int, float)) and not pd.isna(vol_chg) else str(vol_chg)
             amt_chg_str = f"{amt_chg:+.1f}%" if isinstance(amt_chg, (int, float)) and not pd.isna(amt_chg) else str(amt_chg)
+            restock_str = f"{restock:,.0f}" if isinstance(restock, (int, float)) and not pd.isna(restock) else str(restock)
 
             # 用 emoji 标记涨跌
             if isinstance(vol_chg, (int, float)) and not pd.isna(vol_chg):
@@ -120,7 +125,7 @@ def generate_report(
 
             lines.append(
                 f"| {name} | {vol_str} | {prev_vol_str} | {vol_chg_str} | "
-                f"{amt_str} | {prev_amt_str} | {amt_chg_str} | {anomaly_type} |"
+                f"{amt_str} | {prev_amt_str} | {amt_chg_str} | {restock_str} | {anomaly_type} |"
             )
 
         lines.append(f"")

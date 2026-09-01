@@ -1,0 +1,10 @@
+# ============================================
+# Streamlit 管理面板 — 新增依赖
+# ============================================
+# 安装方式：pip install -r requirements_dashboard.txt
+# 基础依赖（已有项目无需重复安装）：pandas, openpyxl, pymysql, requests
+# ============================================
+
+streamlit>=1.28.0
+plotly>=5.17.0
+python-dotenv>=1.0.0
